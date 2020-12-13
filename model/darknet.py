@@ -1,10 +1,15 @@
 from __future__ import division
 
+import _init_paths
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 import numpy as np
+
+
+from predict_transform import predict_transform
 
 def parse_cfg(cfgfile):
     """
@@ -85,7 +90,7 @@ def create_modules(blocks):
                 pad = 0
 
             # 添加convolutional巻积层
-            conv = nn.Conv2d(prev_filters, filters, kernel_size, stride, pad, bias) # pytorch基操
+            conv = nn.Conv2d(prev_filters, filters, kernel_size, stride, pad, bias=bias) # pytorch基操
             module.add_module('conv_{0}'.format(index), conv)   # 添加到该层的nn.Sequential()
             
             # 如果有，添加Batch Norm层
@@ -120,15 +125,15 @@ def create_modules(blocks):
 
             # 如果只有一个层，则结束，相当于直接复制一份
             try:
-                end = int(x['layer'][1])
+                end = int(x['layers'][1])
             except:
                 end = 0
 
             if start > 0:
-                start = start - index
+                start -= index
             
             if end > 0:
-                end = end - index
+                end -= index
             
             route = EmptyLayer()   # 空层,拼接操作直接在整个网络模型的nn.Module对象的forward函数中实现
             module.add_module('route_{0}'.format(index), route)
@@ -155,6 +160,7 @@ def create_modules(blocks):
             anchors = x['anchors'].split(',') # 获取anchor
             anchors = [int(a) for a in anchors]
             anchors = [(anchors[i], anchors[i+1]) for i in range(0, len(anchors), 2)]
+            anchors = [anchors[i] for i in mask]
 
             detection = DetectionLayer(anchors)
             module.add_module('Detection_{0}'.format(index), detection)
@@ -166,11 +172,85 @@ def create_modules(blocks):
     
     return net_info, module_list, output_filters
 
+class Darknet(nn.Module):
+    '''
+    yolo darknet 模型定义
+    '''
+    def __init__(self, cfgfile):
+        super(Darknet, self).__init__()
+        self.blocks = parse_cfg(cfgfile)  # 读取配置文件
+        self.net_info, self.module_list, _ = create_modules(self.blocks) # 生成module_list
+    
+    def forward(self, x, CUDA=False):
+        modules = self.blocks[1:]  # 第一个net块不参与前向传播
+        outputs = {}  # 实现跨层连接，需要暂存各层的输出
+
+        write = 0
+        for i in range(len(modules)):
+            module_type = modules[i]['type']    # 层类型
+
+            # 巻积或者上采样
+            if module_type == 'convolutional' or module_type == 'upsample':
+                m = self.module_list[i]
+                x = self.module_list[i](x)
+            
+            # route层
+            elif module_type == 'route':
+                layers = modules[i]['layers']
+                layers = [int(a) for a in layers]
+
+                if layers[0] > 0:
+                    layers[0] -= i
+                
+                # 只是复制一份数据，而不拼接
+                if len(layers) == 1:
+                    x = outputs[i + layers[0]]
+                else: # 在通道维度上拼接
+                    if layers[1] > 0:
+                        layers[1] -= i
+                    
+                    map1 = outputs[i + layers[0]]
+                    map2 = outputs[i + layers[1]]
+
+                    x = torch.cat((map1, map2), 1)   # (B, C, H, W)
+                
+            # shortcut层
+            elif module_type == 'shortcut':
+                from_ = int(modules[i]['from'])
+                x = outputs[i-1] + outputs[i + from_]
+    
+            
+            # yolo层
+            elif module_type == 'yolo':
+                anchors = self.module_list[i][0].anchors
+                inp_dim = int(self.net_info['height'])  # yolo输入图片w,h一致
+                num_classes = int(modules[i]['classes'])
+
+                x = x.data
+                x = predict_transform(x, inp_dim, anchors, num_classes, CUDA)
+
+                if not write:   # 写入第一个yolo检测头部的结果
+                    detections = x
+                    write = 1
+                else:
+                    detections = torch.cat((detections, x), 1)
+            
+            outputs[i] = x
+        
+        return detections
+
+
 if __name__ == "__main__":
 
-    blocks = parse_cfg('cfg/yolov3.cfg')
+    # blocks = parse_cfg('cfg/yolov3.cfg')
+    # net_info, model_list, output_filters = create_modules(blocks)
+    # print(model_list)
+    # print(output_filters[-3])
 
-    net_info, model_list, output_filters = create_modules(blocks)
+    model = Darknet('cfg/yolov3.cfg')
 
-    #print(model_list)
-    print(output_filters[-3])
+    inp = torch.rand((1, 3, 608, 608))
+
+    pred = model(inp)
+
+    print(pred)
