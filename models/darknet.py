@@ -249,7 +249,7 @@ if __name__ == "__main__":
 
     model = Darknet('cfg/yolov3.cfg')
 
-    inp = torch.rand((1, 3, 608, 608))
+    inp = torch.rand((1, 3, 416, 416))
 
     pred = model(inp)
 
