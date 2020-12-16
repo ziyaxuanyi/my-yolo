@@ -2,6 +2,7 @@ from __future__ import division     # 导入精确除法
 
 from utils.logger import *
 from utils.parse_config import *
+from utils.utils import *
 
 import os      # 必要库
 import sys
@@ -41,9 +42,10 @@ if __name__ == "__main__":
     os.makedirs("checkpoints", exist_ok=True)
 
     # 数据集配置
-    data_config = parse_data_config(opt.data_config)
-    train_path = data_config['train']
-    valid_path = data_config['valid']
+    data_config = parse_data_config(opt.data_config)    # 读取数据集配置文件，主要是路径，其中backup为训练时存放中间结果
+    train_path = data_config['train']   # 训练集路径
+    valid_path = data_config['valid']   # 测试集路径
+    class_names = load_classes(data_config['names'])    # 读取类别标签
 
     print('haha')
 
