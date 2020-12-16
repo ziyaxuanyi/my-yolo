@@ -8,7 +8,7 @@ def parse_data_config(path):
     with open(path, 'r') as fp:
         lines = fp.readlines()
     for line in lines:
-        line = line.strip()   # 去掉右边的空格键
+        line = line.strip()   # 去掉空格键
         if line == '' or line.startswith('#'):   # 跳过空行和注释行
             continue
         key, value = line.split('=')    # 取出每行的键值对
