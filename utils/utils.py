@@ -100,34 +100,35 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     gwh = target_boxes[:, 2:]      # [num_object, 2]  框的w,h
     
     # 计算iou最大者
-    ious = torch.stack([bbox_wh_iou(anchor, gwh) for anchor in anchors])  # 计算每个anchor和目标框的iou，这里用到了广播机制  [num_anchors, num_object, 1]
-    best_ious, best_n = ious.max(0)   # iou最大值和位置
+    ious = torch.stack([bbox_wh_iou(anchor, gwh) for anchor in anchors])  # 计算每个anchor和目标框的iou，这里用到了广播机制  [num_anchors, num_object]
+    best_ious, best_n = ious.max(0)   # 根据iou，计算每个真值框由哪个预设anchor预测，best_n为anchors的索引值，best_ious为相应的最大iou值，形状均为[num_object]
 
     # 获取相应值，调整格式，方便后面计算
     b, target_labels = target[:, :2].long().t()   # [num_object, 2] -->  [2, num_object], 每一列为sample_index, classes_index, b为sample_index，target_labels为classes_index
     gx, gy = gxy.t()    # [2, num_object]  中心坐标
     gw, gh = gwh.t()    # [2, num_object]  w,h
-    gi, gj = gxy.long().t()
+    gi, gj = gxy.long().t()  # [2, num_object] 取正，取到网格格点
 
     # 设置mask
     obj_mask[b, best_n, gj, gi] = 1 # iou最大的那个gird负责预测
-    noobj_mask[b, best_n, gj, gi] = 0
+    noobj_mask[b, best_n, gj, gi] = 0   # 与obj_mask意义相反
 
-    # 当iou超过忽略阈值时，将noobj mask设置为零 ????
-    for i, anchor_ious in enumerate(ious.t()):
+    # 当iou超过忽略阈值时，将noobj mask设置为零，表示该网格有物体
+    for i, anchor_ious in enumerate(ious.t()):    # ious.t() ---> [num_object, num_anchors]
         noobj_mask[b[i], anchor_ious > ignore_thres, gj[i], gi[i]] = 0
     
+    # 论文公式 实际预测的是tx,ty,为偏移格点的偏移量，tw,th为宽高和anchor宽高比的对数，这里计算的是真值
     tx[b, best_n, gj, gi] = gx - gx.floor()
     ty[b, best_n, gj, gi] = gy - gy.floor()
-    # 论文公式
     tw[b, best_n, gj, gi] = torch.log(gw / anchors[best_n][:, 0] + 1e-16)
     th[b, best_n, gj, gi] = torch.log(gh / anchors[best_n][:, 1] + 1e-16)
 
     # label one-hot编码
     tcls[b, best_n, gj, gi, target_labels] = 1
 
-    #
+    # class_mask 表示分类正确的那个位置置为1
     class_mask[b, best_n, gj, gi] = (pred_cls[b, best_n, gj, gi].argmax(-1) == target_labels).float()
+    # 计算预测的框和真实框的iou值
     iou_scores[b, best_n, gj, gi] = bbox_iou(pred_boxes[b, best_n, gj, gi], target_boxes, x1y1x2y2=False)
 
     tconf = obj_mask.float()

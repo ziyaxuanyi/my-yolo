@@ -113,7 +113,7 @@ class YOLOLayer(nn.Module):
         self.obj_scale = 1    # 含有物体的损失权重
         self.noobj_scale = 100  # 不含有物体的损失权重
         self.metrics = {}   # 训练时，用于存储评价指标
-        self.img_dim = img_dim
+        self.img_dim = img_dim   # 图片尺寸，在forward时会更新正确的图片尺寸
         self.grid_size = 0      # 网格尺寸,初始化为0,在forward执行时，在compute_grid_offsets()函数中正确赋值
     
     def compute_grid_offsets(self, grid_size, cuda=True):
@@ -141,7 +141,7 @@ class YOLOLayer(nn.Module):
         #LongTensor = torch.cuda.LongTensor if x.is_cuda else torch.LongTensor
         #ByteTensor = torch.cuda.ByteTensor if x.is_cuda else torch.ByteTensor
 
-        self.img_dim = img_dim
+        self.img_dim = img_dim    # 正确的图片尺寸
         num_samples = x.size(0)   # batch大小
         grid_size = x.size(2)   # 网格大小，即特征图大小
 
@@ -151,7 +151,7 @@ class YOLOLayer(nn.Module):
             .contiguous()     # 在内存中变为连续区域
         )
 
-        # 获取输出
+        # 获取输出，预测值
         x = torch.sigmoid(prediction[..., 0])  # 中心坐标 x,归一化[0,1]
         y = torch.sigmoid(prediction[..., 1])  # 中心坐标 y,归一化[0,1]
         w = prediction[..., 2]   # 宽
@@ -196,23 +196,23 @@ class YOLOLayer(nn.Module):
             loss_y = self.mse_loss(y[obj_mask], ty[obj_mask])
             loss_w = self.mse_loss(w[obj_mask], tw[obj_mask])
             loss_h = self.mse_loss(h[obj_mask], th[obj_mask])
-            loss_conf_obj = self.bce_loss(pred_conf[obj_mask], tconf[obj_mask])  # 是否含有物体误差
-            loss_conf_noobj = self.bce_loss(pred_conf[noobj_mask], tconf[noobj_mask])
+            loss_conf_obj = self.bce_loss(pred_conf[obj_mask], tconf[obj_mask])  # 含有物体误差
+            loss_conf_noobj = self.bce_loss(pred_conf[noobj_mask], tconf[noobj_mask])  # 不含物体的误差
             loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj   # 平衡正负样本的权重
             loss_cls = self.bce_loss(pred_cls[obj_mask], tcls[obj_mask])   # 分类损失
             total_loss = loss_x + loss_y + loss_w + loss_h + loss_conf + loss_cls  # 总损失
 
             # 指标
-            cls_acc = 100 * class_mask[obj_mask].mean()
-            conf_obj = pred_conf[obj_mask].mean()
-            conf_noobj = pred_conf[noobj_mask].mean()
-            conf50 = (pred_conf > 0.5).float()
-            iou50 = (iou_scores > 0.5).float()
-            iou75 = (iou_scores > 0.75).float()
+            cls_acc = 100 * class_mask[obj_mask].mean()   # 分类准确率
+            conf_obj = pred_conf[obj_mask].mean()    # 是否含有物体的准确率
+            conf_noobj = pred_conf[noobj_mask].mean()  # 不含物体的准确率
+            conf50 = (pred_conf > 0.5).float()    # 置信度大于0.5
+            iou50 = (iou_scores > 0.5).float()    # iou>0.5
+            iou75 = (iou_scores > 0.75).float()   # iou>0.75
             detected_mask = conf50 * class_mask * tconf
-            precision = torch.sum(iou50 * detected_mask) / (conf50.sum() + 1e-16)
-            recall50 = torch.sum(iou50 * detected_mask) / (obj_mask.sum() + 1e-16)
-            recall75 = torch.sum(iou75 * detected_mask) / (obj_mask.sum() + 1e-16)
+            precision = torch.sum(iou50 * detected_mask) / (conf50.sum() + 1e-16)  # 平均准确率ap0.5
+            recall50 = torch.sum(iou50 * detected_mask) / (obj_mask.sum() + 1e-16)  # 召回率0.5
+            recall75 = torch.sum(iou75 * detected_mask) / (obj_mask.sum() + 1e-16)  # 召回率0.75
 
             self.metrics = {
                 "loss": to_cpu(total_loss).item(),
@@ -249,7 +249,7 @@ class Darknet(nn.Module):
         self.hyperparams, self.module_list = create_modules(self.module_defs)   # 根据block定义建立module_list
         self.yolo_layers = [layer[0] for layer in self.module_list if hasattr(layer[0], 'metrics')]  # 记录yolo层
         self.img_size = img_size # 图片尺寸
-        self.seen = 0
+        self.seen = 0  # 已经训练的图片的张数
         self.header_info = np.array([0, 0, 0, self.seen, 0], dtype=np.int32)
     
     def forward(self, x, targets=None):
