@@ -113,7 +113,11 @@ class ListDataset(Dataset):
     
     def collate_fn(self, batch):
         '''
-        组装一个batch的数据
+        组装一个batch的数据，自定义读取的数据格式
+        返回：
+        paths: 图片路径
+        imgs：[batch_size, C, W, H]
+        targets: [sample_index, classes_index, x, y, w, h]
         '''
         paths, imgs, targets = list(zip(*batch))   # 获取一个batch的path, imgs, targets
         # 去掉空的目标
