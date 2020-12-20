@@ -29,7 +29,7 @@ if __name__ == "__main__":
     parser.add_argument("--gradient_accumulations", type=int, default=8, help="number of gradient accums before step")   # 更新梯度前累计梯度数，有效缓解计算机内存小的问题
     parser.add_argument("--model_def", type=str, default="config/yolov3.cfg", help="path to model definition file") # 模型定义cfg文件路径
     parser.add_argument("--data_config", type=str, default="config/voc.data", help="path to data config file")    # 数据集配置文件路径
-    parser.add_argument("--pretrained_weights", type=str, help="if specified starts from checkpoint model")       # 预训练模型权重路径
+    parser.add_argument("--pretrained_weights", type=str, default='checkpoints/yolov3_ckpt_0.pth', help="if specified starts from checkpoint model")       # 预训练模型权重路径
     parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")    # 生成batch批次，所用cpu线程数
     parser.add_argument("--img_size", type=int, default=416, help="size of each image dimension")     # 输入图片w,h
     parser.add_argument("--checkpoint_interval", type=int, default=1, help="interval between saving model weights")     # 保存模型间隔
@@ -60,6 +60,15 @@ if __name__ == "__main__":
     # x = torch.rand(4, 3, 416, 416).to(device)
     # x = model(x)
     # print(x)
+
+    # 从上次保存处继续训练
+    if opt.pretrained_weights:
+        if opt.pretrained_weights.endswith(".pth"):
+            model.load_state_dict(torch.load(opt.pretrained_weights))
+            print('load successfully!\n')
+        else:
+            model.load_darknet_weights(opt.pretrained_weights)
+            print('load successfully\n!')
 
     # 加载数据集
     dataset = ListDataset(train_path, augment=True, multiscale=opt.multiscale_training)
@@ -148,7 +157,7 @@ if __name__ == "__main__":
             print(log_str)
 
             model.seen += imgs.size(0)  # 记录已经训练过多少张图片
-        
+
         if epoch % opt.evaluation_interval == 0:
             print('\n---- Evaluating Model ----')
             # 在验证集上评估
@@ -175,7 +184,10 @@ if __name__ == "__main__":
                 ap_table += [[c, class_names[c], "%.5f" % AP[i]]]
             print(AsciiTable(ap_table).table)
             print(f"---- mAP {AP.mean()}")
-
+        
+        if epoch % opt.checkpoint_interval == 0:
+            torch.save(model.state_dict(), f"checkpoints/yolov3_ckpt_%d.pth" % epoch)
+            print('save successfully!')
     
     
     print('haha')
